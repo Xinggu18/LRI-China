@@ -41,18 +41,6 @@ The easiest method:
 1. Open the `map_site` folder
 2. Double-click `index.html`
 
-If your browser is strict about local files, run a local server instead:
-
-```bash
-cd "/Users/xbudian/Documents/Codex/2026-04-23-new-chat/scopus/new project_china/Large Research infrastructures/map_site"
-python3 -m http.server 8000
-```
-
-Then open:
-
-`http://localhost:8000`
-
-## Recommended next steps
 
 - Add coordinates for more projects from your Excel sheet
 - Convert Excel data into `projects.js` automatically
