@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>China Large Research Infrastructures Map</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Large Research Infrastructures</p>
+          <h1>China Large Research Infrastructures Map</h1>
+          <p class="intro">
+            Each red marker represents one project. Hover over a marker to see the
+            project name and research field. As long as you keep adding project names
+            and coordinates to the data file, the map will update automatically.
+          </p>
+        </div>
+        <div class="legend-card">
+          <div class="legend-dot"></div>
+          <div>
+            <strong id="project-count">0</strong>
+            <span> projects loaded</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="map-panel">
+        <div class="panel-top">
+          <div>
+            <h2>Map View</h2>
+            <p>Hover to inspect, click to focus, and expand multi-site infrastructures</p>
+          </div>
+          <div id="map-status" class="map-status">
+            <span class="status-dot"></span>
+            <span id="map-status-text">No multi-site infrastructure expanded</span>
+          </div>
+        </div>
+        <div id="map" aria-label="China map showing LRI distribution"></div>
+      </section>
+
+      <section class="table-panel">
+        <div class="panel-top">
+          <div>
+            <h2>Project List</h2>
+            <p>The table and map markers use the same dataset</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Project Name</th>
+                <th>Short Name</th>
+                <th>Research Field</th>
+                <th>Location</th>
+              </tr>
+            </thead>
+            <tbody id="project-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="./projects.js"></script>
+    <script>
+      const map = L.map("map", {
+        zoomControl: true,
+        scrollWheelZoom: true,
+      }).setView([35.6, 104.2], 4);
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors',
+      }).addTo(map);
+
+      const markerStyle = {
+        radius: 7,
+        color: "#8b0000",
+        weight: 2,
+        fillColor: "#d62828",
+        fillOpacity: 0.92,
+      };
+
+      const multiSiteMarkerStyle = {
+        radius: 9,
+        color: "#6f1d1b",
+        weight: 2,
+        fillColor: "#ff7b54",
+        fillOpacity: 0.95,
+      };
+
+      const siteMarkerStyle = {
+        radius: 6,
+        color: "#9a3412",
+        weight: 2,
+        fillColor: "#fdba74",
+        fillOpacity: 0.98,
+      };
+
+      const tableBody = document.getElementById("project-table-body");
+      document.getElementById("project-count").textContent = projects.length;
+      const statusText = document.getElementById("map-status-text");
+
+      const bounds = [];
+      const expandedSiteLayers = new Map();
+      const projectMarkers = new Map();
+      const tableRows = new Map();
+      let activeMultiSiteKey = null;
+
+      function getProjectPoint(project) {
+        if (typeof project.lat === "number" && typeof project.lng === "number") {
+          return [project.lat, project.lng];
+        }
+        if (project.coordinates?.lat && project.coordinates?.lng) {
+          return [project.coordinates.lat, project.coordinates.lng];
+        }
+        return null;
+      }
+
+      function buildTooltipHtml(project) {
+        const siteSummary = Array.isArray(project.sites) && project.sites.length
+          ? `<span>Sites: ${project.sites.length}</span><span>Click to expand all sites</span>`
+          : "";
+
+        return `
+          <div class="tooltip-card">
+            <strong>${project.name}</strong>
+            <span>${project.shortName || ""}</span>
+            <span>Research field: ${project.field}</span>
+            <span>Location: ${project.location}</span>
+            ${siteSummary}
+          </div>
+        `;
+      }
+
+      function buildPopupHtml(project) {
+        if (!Array.isArray(project.sites) || project.sites.length === 0) {
+          return buildTooltipHtml(project);
+        }
+
+        return `
+          <div class="popup-card">
+            <strong>${project.name}</strong>
+            <span>${project.shortName || ""}</span>
+            <span>Research field: ${project.field}</span>
+            <span>Project type: Multi-site infrastructure</span>
+            <span>Click once to show all sites. Click again to collapse them.</span>
+          </div>
+        `;
+      }
+
+      function buildSitePopupHtml(project, site) {
+        return `
+          <div class="popup-card">
+            <strong>${project.name}</strong>
+            <span>${project.shortName || ""}</span>
+            <span>Site: ${site.siteName}</span>
+            <span>${site.host || ""}</span>
+            <span>Location: ${site.location}</span>
+          </div>
+        `;
+      }
+
+      function getProjectKey(project) {
+        return project.shortName || project.name;
+      }
+
+      function setMarkerVisual(marker, isActive, isMultiSite) {
+        const baseStyle = isMultiSite ? multiSiteMarkerStyle : markerStyle;
+        marker.setStyle({
+          ...baseStyle,
+          radius: isActive ? baseStyle.radius + 2 : baseStyle.radius,
+          weight: isActive ? baseStyle.weight + 1 : baseStyle.weight,
+          fillColor: isActive ? "#f97316" : baseStyle.fillColor,
+          color: isActive ? "#7c2d12" : baseStyle.color,
+        });
+      }
+
+      function updateStatus(message) {
+        statusText.textContent = message;
+      }
+
+      function setActiveProject(projectKey) {
+        activeMultiSiteKey = projectKey;
+        projectMarkers.forEach(({ marker, isMultiSite }, key) => {
+          setMarkerVisual(marker, key === projectKey, isMultiSite);
+        });
+        tableRows.forEach((row, key) => {
+          row.classList.toggle("row-active", key === projectKey);
+        });
+      }
+
+      function clearActiveProject() {
+        activeMultiSiteKey = null;
+        projectMarkers.forEach(({ marker, isMultiSite }) => {
+          setMarkerVisual(marker, false, isMultiSite);
+        });
+        tableRows.forEach((row) => row.classList.remove("row-active"));
+      }
+
+      function ensureMultiSiteMarkers(project, point) {
+        const key = getProjectKey(project);
+        const existingLayer = expandedSiteLayers.get(key);
+        if (existingLayer) {
+          if (!map.hasLayer(existingLayer)) {
+            existingLayer.addTo(map);
+          }
+          return existingLayer;
+        }
+
+        const layerGroup = L.layerGroup();
+
+        project.sites.forEach((site) => {
+          const sitePoint = [site.lat, site.lng];
+          const connector = L.polyline([point, sitePoint], {
+            color: "#f59e0b",
+            weight: 1.5,
+            opacity: 0.65,
+            dashArray: "4, 6",
+          });
+          const siteMarker = L.circleMarker(sitePoint, siteMarkerStyle);
+          siteMarker.bindTooltip(
+            `
+              <div class="tooltip-card">
+                <strong>${site.siteName}</strong>
+                <span>${project.name}</span>
+                <span>${site.location}</span>
+              </div>
+            `,
+            {
+              direction: "top",
+              offset: [0, -8],
+              opacity: 1,
+              sticky: true,
+            },
+          );
+          siteMarker.bindPopup(buildSitePopupHtml(project, site), {
+            maxWidth: 320,
+          });
+          siteMarker.on("click", () => {
+            if (!map.hasLayer(layerGroup)) {
+              layerGroup.addTo(map);
+            }
+            siteMarker.openPopup();
+          });
+
+          layerGroup.addLayer(connector);
+          layerGroup.addLayer(siteMarker);
+        });
+
+        expandedSiteLayers.set(key, layerGroup);
+        layerGroup.addTo(map);
+        return layerGroup;
+      }
+
+      function collapseProject(project) {
+        const key = getProjectKey(project);
+        const layerGroup = expandedSiteLayers.get(key);
+        if (layerGroup && map.hasLayer(layerGroup)) {
+          map.removeLayer(layerGroup);
+        }
+        clearActiveProject();
+        updateStatus("No multi-site infrastructure expanded");
+      }
+
+      function openProject(project, marker, point) {
+        const isMultiSite = Array.isArray(project.sites) && project.sites.length > 0;
+        if (!isMultiSite) {
+          clearActiveProject();
+          updateStatus(`Focused on ${project.shortName || project.name}`);
+          map.flyTo(point, 6, { duration: 0.8 });
+          marker.openPopup();
+          return;
+        }
+
+        const key = getProjectKey(project);
+        if (activeMultiSiteKey === key) {
+          collapseProject(project);
+          map.flyTo(point, 5, { duration: 0.8 });
+          return;
+        }
+
+        if (activeMultiSiteKey) {
+          const activeProject = projects.find((item) => getProjectKey(item) === activeMultiSiteKey);
+          if (activeProject) {
+            collapseProject(activeProject);
+          }
+        }
+
+        const layerGroup = ensureMultiSiteMarkers(project, point);
+        const siteBounds = [point];
+        project.sites.forEach((site) => siteBounds.push([site.lat, site.lng]));
+        setActiveProject(key);
+        updateStatus(`Expanded ${project.shortName || project.name}: ${project.sites.length} mapped sites`);
+        map.flyToBounds(siteBounds, {
+          padding: [60, 60],
+          duration: 0.8,
+          maxZoom: 6,
+        });
+        marker.openPopup();
+        if (!map.hasLayer(layerGroup)) {
+          layerGroup.addTo(map);
+        }
+      }
+
+      projects.forEach((project) => {
+        const point = getProjectPoint(project);
+        if (!point) return;
+
+        const isMultiSite = Array.isArray(project.sites) && project.sites.length > 0;
+        const marker = L.circleMarker(point, isMultiSite ? multiSiteMarkerStyle : markerStyle).addTo(map);
+        const projectKey = getProjectKey(project);
+        projectMarkers.set(projectKey, { marker, isMultiSite });
+        marker.bindTooltip(buildTooltipHtml(project), {
+          direction: "top",
+          offset: [0, -8],
+          opacity: 1,
+          sticky: true,
+        });
+        marker.bindPopup(buildPopupHtml(project), {
+          maxWidth: 360,
+        });
+
+        marker.on("click", () => {
+          openProject(project, marker, point);
+        });
+
+        bounds.push(point);
+
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${project.name}</td>
+          <td>${project.shortName || ""}</td>
+          <td>${project.field}</td>
+          <td>${project.location}${isMultiSite ? " (multi-site)" : ""}</td>
+        `;
+        tableRows.set(projectKey, row);
+        row.addEventListener("mouseenter", () => marker.openTooltip());
+        row.addEventListener("mouseleave", () => marker.closeTooltip());
+        row.addEventListener("click", () => {
+          openProject(project, marker, point);
+        });
+        tableBody.appendChild(row);
+      });
+
+      if (bounds.length) {
+        map.fitBounds(bounds, { padding: [50, 50] });
+      }
+    </script>
+  </body>
+</html>
