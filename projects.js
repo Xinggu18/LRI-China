@@ -1,7 +1,7 @@
 const projects = [
   {
-    name: "Five-hundred-meter Aperture Spherical Radio Telescope",
-    shortName: "FAST",
+    name: "Five-hundred-meter Aperture Spherical Radio Telescope （FAST）",
+   
     field: "Space and Astronomy / Radio Astronomy",
     location: "Pingtang, Guizhou",
     lat: 25.652,
@@ -292,7 +292,7 @@ const projects = [
     shortName: "TransMed",
     field: "Biomedical Research / Translational Medicine",
     coordinateType: "multi-site",
-    location: "China",
+    
     coordinates: {
       lat: 35.0,
       lng: 104.0,
